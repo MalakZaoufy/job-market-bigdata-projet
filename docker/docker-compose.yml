@@ -1,0 +1,209 @@
+services:
+
+  # =====================================================
+  # POSTGRESQL
+  # =====================================================
+
+  postgres:
+    image: postgres:15
+
+    container_name: job_postgres
+
+    restart: always
+
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: job_market
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    networks:
+      - job_network
+
+  # =====================================================
+  # MINIO
+  # =====================================================
+
+  minio:
+    image: minio/minio
+
+    container_name: job_minio
+
+    restart: always
+
+    command: server /data --console-address ":9001"
+
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin123
+
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+
+    volumes:
+      - minio_data:/data
+
+    networks:
+      - job_network
+
+  # =====================================================
+  # ZOOKEEPER
+  # =====================================================
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.4.0
+
+    container_name: job_zookeeper
+
+    restart: always
+
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+    ports:
+      - "2181:2181"
+
+    networks:
+      - job_network
+
+  # =====================================================
+  # KAFKA
+  # =====================================================
+
+  kafka:
+    image: confluentinc/cp-kafka:7.4.0
+
+    container_name: job_kafka
+
+    restart: always
+
+    depends_on:
+      - zookeeper
+
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+
+    environment:
+
+      # Broker
+      KAFKA_BROKER_ID: 1
+
+      # ZooKeeper
+      KAFKA_ZOOKEEPER_CONNECT: job_zookeeper:2181
+
+      # =================================================
+      # DOUBLE LISTENER
+      # =================================================
+
+      # interne Docker
+      # externe Python local
+
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://job_kafka:29092,PLAINTEXT_HOST://localhost:9092
+
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      # replication
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+    networks:
+      - job_network
+
+  # =====================================================
+  # AIRFLOW
+  # =====================================================
+
+  airflow:
+    image: apache/airflow:2.8.1
+
+    container_name: job_airflow
+
+    restart: always
+
+    ports:
+      - "8080:8080"
+
+    environment:
+
+      AIRFLOW__CORE__EXECUTOR: SequentialExecutor
+
+      AIRFLOW__CORE__LOAD_EXAMPLES: "False"
+
+    volumes:
+
+      - ../airflow/dags:/opt/airflow/dags
+
+      - ../scraper:/opt/airflow/scraper
+
+      - ../spark_jobs:/opt/airflow/spark_jobs
+
+      - ../warehouse:/opt/airflow/warehouse
+
+    command: airflow standalone
+
+    depends_on:
+      - postgres
+      - minio
+      - kafka
+
+    networks:
+      - job_network
+
+  # =====================================================
+  # KAFKA UI
+  # =====================================================
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui
+
+    container_name: job_kafka_ui
+
+    restart: always
+
+    ports:
+      - "8085:8080"
+
+    environment:
+
+      KAFKA_CLUSTERS_0_NAME: local
+
+      # IMPORTANT
+      # Kafka UI utilise listener Docker interne
+
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: job_kafka:29092
+
+      KAFKA_CLUSTERS_0_ZOOKEEPER: job_zookeeper:2181
+
+    depends_on:
+      - kafka
+
+    networks:
+      - job_network
+
+# =====================================================
+# VOLUMES
+# =====================================================
+
+volumes:
+
+  postgres_data:
+
+  minio_data:
+
+# =====================================================
+# NETWORK
+# =====================================================
+
+networks:
+
+  job_network:
