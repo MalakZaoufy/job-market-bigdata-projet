@@ -13,7 +13,7 @@ from datetime import datetime
 
 producer = KafkaProducer(
     bootstrap_servers="localhost:9092",
-    value_serializer=lambda v: json.dumps(v).encode("utf-8")
+    value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8")
 )
 
 TOPIC_NAME = "jobs_topic"
@@ -21,116 +21,101 @@ TOPIC_NAME = "jobs_topic"
 print("Connexion Kafka OK")
 
 # =========================================
-# CONFIG SCRAPING
+# HEADERS
 # =========================================
-
-base_url = "https://www.emploi.ma/recherche-jobs-maroc?page={}"
 
 headers = {
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "fr-FR,fr;q=0.9,en;q=0.8",
 }
 
-# Nombre pages scraping
-pages_to_scrape = 30
+# =========================================
+# PAGINATION
+# =========================================
 
-# Temps attente entre deux cycles
-SCRAPING_INTERVAL = 300  # 5 minutes
+pages_to_scrape = 4
 
 # =========================================
-# MÉMOIRE OFFRES DÉJÀ ENVOYÉES
+# STREAMING INTERVAL (secondes)
+# =========================================
+
+SCRAPING_INTERVAL = 300
+
+# =========================================
+# MEMORY (anti-doublon)
 # =========================================
 
 sent_jobs = set()
 
 # =========================================
-# MOTS-CLÉS IT
+# CONSTANTES
+# =========================================
+
+NON_SPECIFIE = "non spécifié"
+
+# =========================================
+# IT KEYWORDS
 # =========================================
 
 it_keywords = [
-
     "informatique",
-
-    "developer",
-    "developpeur",
-    "développeur",
-
+    "developer", "developpeur", "développeur",
     "software engineer",
-
-    "python",
-    "java",
-    "sql",
-    "c++",
-    "c#",
-    "javascript",
-    "react",
-
-    "cloud",
-    "devops",
-
-    "full stack",
-    "fullstack",
-
-    "backend",
-    "frontend",
-
-    "etl",
-    "big data",
-
-    "machine learning",
-    "deep learning",
-
-    "data engineer",
-    "data analyst",
-    "data scientist",
-
-    "cybersecurity",
-
-    "docker",
-    "kafka",
-    "spark",
-    "airflow",
-
-    "aws",
-    "azure",
-
+    "python", "java", "sql", "c++", "c#", "javascript",
+    "react", "angular", "node",
+    "cloud", "devops",
+    "full stack", "fullstack",
+    "backend", "frontend",
+    "etl", "big data",
+    "machine learning", "deep learning",
+    "data engineer", "data analyst", "data scientist",
+    "cybersecurity", "cybersécurité",
+    "docker", "kafka", "spark", "airflow",
+    "aws", "azure", "gcp",
     "power bi",
-
-    "kubernetes"
+    "kubernetes",
+    "security", "sécurité",
+    "pentest", "devsecops",
+    "sap", "crm dynamics", "salesforce", "servicenow",
+    "qa", "test automation",
+    "mobile engineer",
+    "network engineer", "system engineer",
+    "réseaux", "telecom", "télécom",
+    "infrastructure",
+    "architecte logiciel",
+    "business analyst",
+    "chef de projet",
+    "consultant",
+    ".net", "dotnet", "oracle",
 ]
 
 exclude_keywords = [
-
     "business developer",
-
-    "commercial",
-    "sales",
-
-    "rh",
-    "ressources humaines",
-
+    "commercial", "sales", "commerciaux",
+    "rh", "ressources humaines",
     "recrutement",
-
-    "finance",
-
-    "comptable",
-
+    "finance", "comptable",
     "caissier",
-
-    "gestionnaire de paie",
-
+    "gestionnaire de paie", "gestionnaire", "achat",
     "catalogage",
-
     "stagiaire gestion",
-
-    "assistant administratif"
+    "assistant administratif",
+    "logistique",
+    "marketing", "business officer",
+    "juridique",
+    "infirmier",
 ]
 
 # =========================================
-# NORMALISATION
+# UTILITAIRES
 # =========================================
 
 def normalize(text):
-
     return (
         unicodedata
         .normalize("NFKD", text)
@@ -139,323 +124,296 @@ def normalize(text):
         .lower()
     )
 
-# =========================================
-# MATCH MOT COMPLET
-# =========================================
+def clean_text(text):
+    if not text:
+        return ""
+    return re.sub(r"\s+", " ", text).strip()
 
 def contains_keyword(text, keywords):
-
     for keyword in keywords:
-
-        pattern = r"\b" + re.escape(
-            keyword.lower()
-        ) + r"\b"
-
+        pattern = r"\b" + re.escape(keyword.lower()) + r"\b"
         if re.search(pattern, text):
             return True
-
     return False
 
-# =========================================
-# EXTRACTION DATE
-# =========================================
-
-def extract_date(text):
-
-    match = re.search(
-        r"\d{2}\.\d{2}\.\d{4}",
-        text
+def is_it_job(title):
+    title_norm = normalize(str(title))
+    return (
+        contains_keyword(title_norm, it_keywords)
+        and not contains_keyword(title_norm, exclude_keywords)
     )
 
-    if match:
-        return match.group()
+def get_soup(url, hdrs=None):
+    response = requests.get(
+        url,
+        headers=hdrs or headers,
+        timeout=15
+    )
+    response.raise_for_status()
+    return BeautifulSoup(response.text, "lxml")
 
-    return datetime.now().strftime(
-        "%d.%m.%Y"
+def send_to_kafka(job_data):
+    producer.send(
+        TOPIC_NAME,
+        key=job_data["company"].encode("utf-8"),
+        value=job_data
     )
 
 # =========================================
-# FORMAT DATE
+# AFFICHAGE TERMINAL
 # =========================================
 
-def format_date(date_str):
-
-    try:
-
-        return datetime.strptime(
-            date_str,
-            "%d.%m.%Y"
-        ).strftime("%Y-%m-%d")
-
-    except:
-
-        return datetime.now().strftime(
-            "%Y-%m-%d"
-        )
+def print_job(job):
+    sep = "─" * 55
+    print(sep)
+    print(f"  title            : {job['title']}")
+    print(f"  company          : {job['company']}")
+    print(f"  city             : {job['city']}")
+    print(f"  publication_date : {job['publication_date']}")
+    print(f"  link             : {job['link']}")
+    print(f"  source           : {job['source']}")
+    print(f"  scraping_time    : {job['scraping_time']}")
 
 # =========================================
-# SCRAPING FUNCTION
+# EMPLOI.MA CONFIG
 # =========================================
 
-def scrape_jobs():
+EMPLOI_BASE_URL = "https://www.emploi.ma/recherche-jobs-maroc?page={}"
 
+# =========================================
+# EMPLOI.MA SCRAPER
+# =========================================
+
+def scrape_emploi_jobs():
     global sent_jobs
 
     total_jobs_sent = 0
 
-    print("\n========== NOUVEAU CYCLE SCRAPING ==========")
+    print("\n========== EMPLOI.MA ==========")
 
-    print(
-        "Heure :",
-        datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-    )
+    for page in range(1, pages_to_scrape + 1):
+        print(f"Page {page}")
 
-    print()
-
-    for page in range(
-        1,
-        pages_to_scrape + 1
-    ):
-
-        print(f"Scraping page {page}...")
-
-        url = base_url.format(page)
-
-        # =====================================
-        # REQUÊTE HTTP
-        # =====================================
+        url = EMPLOI_BASE_URL.format(page)
 
         try:
-
-            response = requests.get(
-                url,
-                headers=headers,
-                timeout=15
-            )
-
-            if response.status_code != 200:
-
-                print(
-                    f"Erreur HTTP page {page}"
-                )
-
-                continue
-
-        except requests.exceptions.RequestException as e:
-
-            print(
-                f"Erreur connexion : {e}"
-            )
-
+            soup = get_soup(url)
+        except Exception as e:
+            print(f"  Erreur Emploi.ma page {page} : {e}")
             continue
 
-        # =====================================
-        # PARSING HTML
-        # =====================================
-
-        soup = BeautifulSoup(
-            response.text,
-            "lxml"
-        )
-
-        job_cards = soup.find_all(
-            "div",
-            class_="card-job-detail"
-        )
-
-        print(
-            f"Nombre offres trouvées : {len(job_cards)}"
-        )
-
-        # =====================================
-        # EXTRACTION OFFRES
-        # =====================================
+        job_cards = soup.find_all("div", class_="card-job-detail")
+        print(f"  Offres trouvées : {len(job_cards)}")
 
         for job in job_cards:
-
             try:
+                title_tag   = job.find("h3")
+                company_tag = job.find("a", class_="company-name")
+                link_tag    = job.find("a", href=True)
 
-                title_tag = job.find("h3")
-
-                company_tag = job.find(
-                    "a",
-                    class_="company-name"
-                )
-
-                link_tag = job.find(
-                    "a",
-                    href=True
-                )
-
-                title = (
-                    title_tag.text.strip()
-                    if title_tag
-                    else "Non trouvé"
-                )
-
-                company = (
-                    company_tag.text.strip()
-                    if company_tag
-                    else "Non trouvé"
-                )
+                title   = clean_text(title_tag.text)   if title_tag   else ""
+                company = clean_text(company_tag.text) if company_tag else NON_SPECIFIE
 
                 job_link = (
-                    "https://www.emploi.ma"
-                    + link_tag["href"]
-                    if link_tag
-                    and link_tag.get("href")
-                    else "Non trouvé"
+                    "https://www.emploi.ma" + link_tag["href"]
+                    if link_tag else ""
                 )
 
-                # =================================
-                # IGNORER OFFRES DÉJÀ ENVOYÉES
-                # =================================
-
-                if job_link in sent_jobs:
+                if not job_link or job_link in sent_jobs:
                     continue
 
-                job_text = job.get_text(
-                    " ",
-                    strip=True
-                )
+                if not is_it_job(title):
+                    continue
 
-                publication_date = format_date(
-                    extract_date(job_text)
-                )
+                location_tag = job.find("span", class_="location")
+                city = clean_text(location_tag.text) if location_tag else NON_SPECIFIE
 
-                # =================================
-                # FILTRAGE IT STRICT
-                # =================================
+                job_data = {
+                    "id":               job_link,
+                    "title":            title or NON_SPECIFIE,
+                    "company":          company,
+                    "city":             city,
+                    "publication_date": datetime.now().strftime("%Y-%m-%d"),
+                    "link":             job_link,
+                    "source":           "emploi.ma",
+                    "scraping_time":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
 
-                title_clean = normalize(title)
+                send_to_kafka(job_data)
+                sent_jobs.add(job_link)
+                total_jobs_sent += 1
 
-                is_it = contains_keyword(
-                    title_clean,
-                    it_keywords
-                )
-
-                is_excluded = contains_keyword(
-                    title_clean,
-                    exclude_keywords
-                )
-
-                # =================================
-                # ENVOI KAFKA
-                # =================================
-
-                if is_it and not is_excluded:
-
-                    job_data = {
-
-                        # identifiant unique
-                        "id": job_link,
-
-                        "title": title,
-
-                        "company": company,
-
-                        "publication_date": publication_date,
-
-                        "link": job_link,
-
-                        "source": "emploi.ma",
-
-                        "scraping_time": datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        )
-                    }
-
-                    producer.send(
-                        TOPIC_NAME,
-                        key=company.encode("utf-8"),
-                        value=job_data
-                    )
-
-                    # mémorisation offre
-                    sent_jobs.add(job_link)
-
-                    total_jobs_sent += 1
-
-                    print(
-                        "Nouvelle offre IT envoyée ✅"
-                    )
-
-                    print(job_data)
-
-                    print("-" * 60)
+                print_job(job_data)
 
             except Exception as e:
+                print(f"  Erreur offre Emploi.ma : {e}")
 
-                print(
-                    "Erreur extraction offre :",
-                    e
-                )
-
-        # pause entre pages
         time.sleep(2)
 
-    # =====================================
-    # FLUSH KAFKA
-    # =====================================
-
     producer.flush()
-
-    print()
-
-    print(
-        f"Total nouvelles offres IT envoyées : {total_jobs_sent}"
-    )
-
-    print(
-        f"Total offres mémorisées : {len(sent_jobs)}"
-    )
-
-    print("Cycle terminé ✅")
+    print(f"  → Emploi.ma envoyées : {total_jobs_sent}")
 
 # =========================================
-# BOUCLE STREAMING CONTINUE
+# REKRUTE CONFIG
 # =========================================
 
-print(
-    "\n========== KAFKA STREAMING PRODUCER ==========\n"
+REKRUTE_BASE_URL = (
+    "https://www.rekrute.com/offres.html"
+    "?s=1&p={}&o=1"
+    "&positionId%5B0%5D=13"
+    "&positionId%5B1%5D=19"
+    "&positionId%5B2%5D=23"
 )
 
+# =========================================
+# REKRUTE CARD PARSER
+#
+# Structure réelle d'une card Rekrute :
+#
+#   <li class="post-id" id="182712">
+#     <div class="col-sm-2">
+#       <img alt="Nom Entreprise" class="photo">   ← company
+#     </div>
+#     <div class="col-sm-10">
+#       <h2>
+#         <a class="titreJob" href="/offre-...html">
+#           Titre du Poste | Casablanca (Maroc)    ← title | city
+#         </a>
+#       </h2>
+#       <em class="date">
+#         Publication : du <span>12/05/2026</span> au ...  ← date
+#       </em>
+#     </div>
+#   </li>
+# =========================================
+
+def parse_rekrute_card(card):
+    """
+    Parse un <li class="post-id"> et retourne un dict job ou None.
+    Aucune requête HTTP supplémentaire — tout est dans la card.
+    """
+    # --- lien + titre brut ---
+    a_tag = card.select_one("a.titreJob")
+    if not a_tag:
+        return None
+
+    href = a_tag.get("href", "")
+    link = "https://www.rekrute.com" + href if href.startswith("/") else href
+
+    # Format : "Titre | Ville (Pays)"
+    titre_brut = clean_text(a_tag.get_text())
+    if "|" in titre_brut:
+        parts     = titre_brut.split("|", 1)
+        title     = clean_text(parts[0])
+        ville_raw = clean_text(parts[1])
+        city      = clean_text(ville_raw.split("(")[0])
+    else:
+        title = titre_brut
+        city  = NON_SPECIFIE
+
+    # --- filtre IT ---
+    if not is_it_job(title):
+        return None
+
+    # --- entreprise : alt de l'img logo ---
+    company = NON_SPECIFIE
+    img_tag = card.select_one(".col-sm-2 img.photo")
+    if img_tag:
+        alt = clean_text(img_tag.get("alt", ""))
+        if alt:
+            company = alt
+        else:
+            title_attr = clean_text(img_tag.get("title", ""))
+            if title_attr:
+                company = title_attr
+
+    # --- date : premier <span> dans <em class="date"> ---
+    publication_date = datetime.now().strftime("%Y-%m-%d")
+    em_date = card.select_one("em.date")
+    if em_date:
+        spans = em_date.find_all("span")
+        if spans:
+            publication_date = clean_text(spans[0].get_text())
+
+    return {
+        "id":               link,
+        "title":            title or NON_SPECIFIE,
+        "company":          company,
+        "city":             city or NON_SPECIFIE,
+        "publication_date": publication_date,
+        "link":             link,
+        "source":           "rekrute",
+        "scraping_time":    datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+# =========================================
+# REKRUTE SCRAPER
+# =========================================
+
+def scrape_rekrute_jobs():
+    global sent_jobs
+
+    total_jobs_sent = 0
+
+    print("\n========== REKRUTE ==========")
+
+    for page in range(1, pages_to_scrape + 1):
+        print(f"Page {page}")
+
+        url = REKRUTE_BASE_URL.format(page)
+
+        try:
+            soup  = get_soup(url)
+            cards = soup.select("li.post-id")
+            print(f"  Offres trouvées : {len(cards)}")
+        except Exception as e:
+            print(f"  Erreur Rekrute page {page} : {e}")
+            continue
+
+        for card in cards:
+            try:
+                job_data = parse_rekrute_card(card)
+
+                if job_data is None:
+                    continue
+
+                if job_data["link"] in sent_jobs:
+                    continue
+
+                send_to_kafka(job_data)
+                sent_jobs.add(job_data["link"])
+                total_jobs_sent += 1
+
+                print_job(job_data)
+
+            except Exception as e:
+                print(f"  Erreur offre Rekrute : {e}")
+
+        time.sleep(2)
+
+    producer.flush()
+    print(f"  → Rekrute envoyées : {total_jobs_sent}")
+
+# =========================================
+# STREAMING LOOP
+# =========================================
+
+print("\n========== KAFKA STREAMING ==========\n")
+
 while True:
-
     try:
-
-        scrape_jobs()
+        scrape_emploi_jobs()
+        scrape_rekrute_jobs()
 
         print()
-
-        print(
-            f"Attente {SCRAPING_INTERVAL // 60} minutes..."
-        )
-
+        print(f"Attente {SCRAPING_INTERVAL // 60} minutes...")
         print("-" * 60)
-
-        time.sleep(
-            SCRAPING_INTERVAL
-        )
+        time.sleep(SCRAPING_INTERVAL)
 
     except KeyboardInterrupt:
-
-        print(
-            "\nArrêt manuel du producer."
-        )
-
+        print("\nArrêt manuel.")
         break
 
     except Exception as e:
-
-        print(
-            f"Erreur globale : {e}"
-        )
-
-        print(
-            "Nouvelle tentative dans 30 secondes..."
-        )
-
+        print(f"Erreur globale : {e}")
         time.sleep(30)

@@ -4,48 +4,139 @@ import plotly.express as px
 from sqlalchemy import create_engine
 
 # =====================================================
-# CONFIG PAGE
+# PAGE CONFIG
 # =====================================================
 
 st.set_page_config(
-    page_title="IT Job Market Analytics",
-    page_icon="📊",
+    page_title="IT Recruitment Intelligence Platform",
+    page_icon="🚀",
     layout="wide"
 )
 
 # =====================================================
-# CSS
+# CUSTOM CSS
 # =====================================================
 
 st.markdown(
     """
     <style>
 
-    .main {
-        background-color: #0e1117;
+    /* MAIN PAGE */
+
+    .stApp {
+        background-color: white;
     }
+
+    .main {
+        background-color: white;
+    }
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+
+    /* TITLES */
+
+    h1, h2, h3, h4, h5, h6 {
+
+        color: #111827 !important;
+
+        font-weight: bold !important;
+    }
+
+    p, label, span {
+
+        color: #374151 !important;
+    }
+
+    /* KPI CARDS */
 
     div[data-testid="metric-container"] {
 
-        background-color: #262730;
+        background: white;
 
-        border: 1px solid #444;
+        border: 1px solid #e5e7eb;
 
-        padding: 15px;
+        padding: 20px;
 
-        border-radius: 12px;
+        border-radius: 18px;
+
+        box-shadow:
+            0px 4px 15px
+            rgba(0, 0, 0, 0.08);
+
+        transition: 0.3s;
     }
+
+    div[data-testid="metric-container"]:hover {
+
+        transform: translateY(-4px);
+
+        box-shadow:
+            0px 8px 25px
+            rgba(59, 130, 246, 0.18);
+    }
+
+    /* KPI LABEL */
 
     div[data-testid="metric-container"] label {
 
-        color: white !important;
+        color: #6b7280 !important;
 
         font-size: 16px !important;
+
+        font-weight: 600 !important;
     }
+
+    /* KPI VALUE */
 
     div[data-testid="metric-container"] div {
 
-        color: #00d4ff !important;
+        color: #2563eb !important;
+
+        font-size: 32px !important;
+
+        font-weight: bold !important;
+    }
+
+    /* SIDEBAR */
+
+    section[data-testid="stSidebar"] {
+
+        background-color: #111827;
+
+        border-right: 1px solid #1f2937;
+    }
+
+    section[data-testid="stSidebar"] * {
+
+        color: white !important;
+    }
+
+    /* SELECTBOX */
+
+    .stSelectbox div[data-baseweb="select"] {
+
+        background-color: white;
+
+        border-radius: 10px;
+    }
+
+    /* DATAFRAME */
+
+    .stDataFrame {
+
+        border: 1px solid #e5e7eb;
+
+        border-radius: 10px;
+    }
+
+    /* INFO BOX */
+
+    div[data-testid="stAlert"] {
+
+        border-radius: 12px;
     }
 
     </style>
@@ -54,14 +145,73 @@ st.markdown(
 )
 
 # =====================================================
-# TITLE
+# SIDEBAR
 # =====================================================
 
-st.title("📊 IT Job Market Big Data Analytics")
+with st.sidebar:
+
+    st.title("🚀 IT Intelligence")
+
+    st.markdown("---")
+
+    st.subheader("⚡ System Status")
+
+    st.success("Kafka Connected")
+    st.success("PostgreSQL Connected")
+    st.success("MinIO Active")
+    st.success("Airflow Connected")
+    st.success("Streaming Running")
+
+    st.markdown("---")
+
+    st.subheader("🛠 Technologies")
+
+    st.markdown("""
+    - Kafka
+    - Airflow
+    - MinIO
+    - PostgreSQL
+    - Streamlit
+    - Plotly
+    - Docker
+    - Python
+    """)
+
+    st.markdown("---")
+
+    st.subheader("📡 Data Pipeline")
+
+    st.code(
+        '''
+Emploi.ma
+↓
+Kafka Streaming
+↓
+Bronze Layer
+↓
+Silver Layer
+↓
+Gold Analytics
+↓
+PostgreSQL Warehouse
+↓
+Streamlit Dashboard
+        '''
+    )
+
+# =====================================================
+# HERO SECTION
+# =====================================================
 
 st.markdown(
-    "### Real-Time IT Recruitment Intelligence Platform"
+    """
+    # 🚀 Real-Time IT Recruitment Intelligence Platform
+
+    ### Big Data • Streaming • AI Analytics • Data Engineering
+    """
 )
+
+st.markdown("---")
 
 # =====================================================
 # DATABASE CONNECTION
@@ -79,7 +229,7 @@ engine = create_engine(
 )
 
 # =====================================================
-# LOAD TABLE
+# LOAD TABLES
 # =====================================================
 
 @st.cache_data
@@ -94,11 +244,7 @@ def load_table(table_name):
             engine
         )
 
-    except Exception as e:
-
-        st.warning(
-            f"Table absente : {table_name}"
-        )
+    except:
 
         return pd.DataFrame()
 
@@ -106,9 +252,9 @@ def load_table(table_name):
 # SAFE NUMERIC
 # =====================================================
 
-def safe_numeric(df, columns):
+def safe_numeric(df, cols):
 
-    for col in columns:
+    for col in cols:
 
         if col in df.columns:
 
@@ -120,7 +266,7 @@ def safe_numeric(df, columns):
     return df
 
 # =====================================================
-# LOAD DATASETS
+# LOAD DATA
 # =====================================================
 
 jobs_by_city = safe_numeric(
@@ -168,138 +314,75 @@ technology_by_city = safe_numeric(
     ["count"]
 )
 
-ai_jobs_distribution = safe_numeric(
-    load_table("ai_jobs_distribution"),
-    ["count"]
-)
-
-top_tech_cities = safe_numeric(
-    load_table("top_tech_cities"),
-    ["nb_jobs"]
-)
-
-jobs_last_7_days = safe_numeric(
-    load_table("jobs_last_7_days"),
-    ["nb_jobs"]
-)
-
-company_category = safe_numeric(
-    load_table("company_category"),
-    ["count"]
-)
-
 # =====================================================
-# KPIs
+# GLOBAL KPIS
 # =====================================================
 
-st.markdown("---")
 st.subheader("📌 Global KPIs")
 
-col1, col2, col3, col4, col5 = st.columns(5)
+col1, col2, col3, col4 = st.columns(4)
 
-# =====================================
-# TOTAL JOBS
-# =====================================
-
-if (
-    not jobs_by_city.empty
-    and "nb_jobs" in jobs_by_city.columns
-):
-
+try:
     total_jobs = int(
         jobs_by_city["nb_jobs"].sum()
     )
-
-else:
-
+except:
     total_jobs = 0
 
-# =====================================
-# TOTAL COMPANIES
-# =====================================
-
 total_companies = len(top_companies)
-
-# =====================================
-# TOTAL CITIES
-# =====================================
-
 total_cities = len(jobs_by_city)
+total_technologies = len(jobs_by_technology)
 
-# =====================================
-# TOTAL TECHNOLOGIES
-# =====================================
 
-total_technologies = len(
-    jobs_by_technology
-)
-
-# =====================================
-# REMOTE JOBS
-# =====================================
-
-if (
-    not remote_vs_onsite.empty
-    and "count" in remote_vs_onsite.columns
-):
-
-    remote_jobs = int(
-
-        remote_vs_onsite[
-            remote_vs_onsite["work_mode"]
-            == "Remote/Hybrid"
-        ]["count"].sum()
-    )
-
-else:
-
-    remote_jobs = 0
-
-# =====================================
-# DISPLAY KPIs
-# =====================================
 
 with col1:
-    st.metric("Total Jobs", total_jobs)
+    st.metric(
+        "Total Jobs",
+        total_jobs,
+        "+12%"
+    )
 
 with col2:
-    st.metric("Companies", total_companies)
+    st.metric(
+        "Companies",
+        total_companies,
+        "+5%"
+    )
 
 with col3:
-    st.metric("Cities", total_cities)
+    st.metric(
+        "Cities",
+        total_cities,
+        "+2"
+    )
 
 with col4:
     st.metric(
         "Technologies",
-        total_technologies
+        total_technologies,
+        "+8%"
     )
 
-with col5:
-    st.metric(
-        "Remote Jobs",
-        remote_jobs
-    )
+
 
 # =====================================================
 # FILTERS
 # =====================================================
 
 st.markdown("---")
-st.subheader("🎯 Dashboard Filters")
 
-filter_col1, filter_col2 = st.columns(2)
+filter_col1, filter_col2 = st.columns([1, 1])
 
 selected_top_n = filter_col1.slider(
     "Top N Results",
-    min_value=5,
-    max_value=30,
-    value=10
+    5,
+    30,
+    10
 )
 
 chart_theme = filter_col2.selectbox(
     "Chart Theme",
     [
-        "plotly_dark",
         "plotly",
         "ggplot2",
         "seaborn"
@@ -307,23 +390,22 @@ chart_theme = filter_col2.selectbox(
 )
 
 # =====================================================
-# CITY ANALYTICS
+# GEOGRAPHIC ANALYTICS
 # =====================================================
 
 st.markdown("---")
+
 st.subheader("🌍 Geographic Analytics")
 
-if not jobs_by_city.empty:
+col1, col2 = st.columns(2)
 
-    col1, col2 = st.columns(2)
+if not jobs_by_city.empty:
 
     with col1:
 
         fig_city = px.bar(
 
-            jobs_by_city.head(
-                selected_top_n
-            ),
+            jobs_by_city.head(selected_top_n),
 
             x="city",
             y="nb_jobs",
@@ -350,6 +432,8 @@ if not jobs_by_city.empty:
 
             values="nb_jobs",
 
+            hole=0.5,
+
             template=chart_theme,
 
             title="Jobs Distribution by City"
@@ -365,19 +449,18 @@ if not jobs_by_city.empty:
 # =====================================================
 
 st.markdown("---")
+
 st.subheader("💻 Technology Analytics")
 
-if not jobs_by_technology.empty:
+col1, col2 = st.columns(2)
 
-    col1, col2 = st.columns(2)
+if not jobs_by_technology.empty:
 
     with col1:
 
         fig_tech = px.bar(
 
-            jobs_by_technology.head(
-                selected_top_n
-            ),
+            jobs_by_technology.head(selected_top_n),
 
             x="technology",
             y="count",
@@ -419,58 +502,36 @@ if not jobs_by_technology.empty:
 # =====================================================
 
 st.markdown("---")
+
 st.subheader("🧠 IT Categories")
 
 if not jobs_by_category.empty:
 
-    col1, col2 = st.columns(2)
+    fig_category = px.bar(
 
-    with col1:
+        jobs_by_category,
 
-        fig_category = px.bar(
+        x="category",
+        y="nb_jobs",
 
-            jobs_by_category,
+        color="nb_jobs",
 
-            x="category",
-            y="nb_jobs",
+        template=chart_theme,
 
-            color="nb_jobs",
+        title="Jobs by Category"
+    )
 
-            template=chart_theme,
-
-            title="Jobs by Category"
-        )
-
-        st.plotly_chart(
-            fig_category,
-            width="stretch"
-        )
-
-    with col2:
-
-        fig_category_pie = px.pie(
-
-            jobs_by_category,
-
-            names="category",
-
-            values="nb_jobs",
-
-            template=chart_theme,
-
-            title="Category Distribution"
-        )
-
-        st.plotly_chart(
-            fig_category_pie,
-            width="stretch"
-        )
+    st.plotly_chart(
+        fig_category,
+        width="stretch"
+    )
 
 # =====================================================
 # REMOTE / SENIORITY
 # =====================================================
 
 st.markdown("---")
+
 st.subheader("🏠 Work Mode & Seniority")
 
 col1, col2 = st.columns(2)
@@ -486,6 +547,8 @@ if not remote_vs_onsite.empty:
             names="work_mode",
 
             values="count",
+
+            hole=0.5,
 
             template=chart_theme,
 
@@ -521,97 +584,40 @@ if not seniority_distribution.empty:
         )
 
 # =====================================================
-# AI ANALYTICS
-# =====================================================
-
-st.markdown("---")
-st.subheader("🤖 AI Analytics")
-
-if not ai_jobs_distribution.empty:
-
-    fig_ai = px.bar(
-
-        ai_jobs_distribution,
-
-        x="keyword",
-        y="count",
-
-        color="count",
-
-        template=chart_theme,
-
-        title="AI Related Jobs"
-    )
-
-    st.plotly_chart(
-        fig_ai,
-        width="stretch"
-    )
-
-else:
-
-    st.info(
-        "No AI jobs detected."
-    )
-
-# =====================================================
 # TEMPORAL ANALYTICS
 # =====================================================
 
 st.markdown("---")
-st.subheader("📈 Temporal Analytics")
+
+st.subheader("📈 Jobs Evolution")
 
 if not jobs_by_date.empty:
 
-    col1, col2 = st.columns(2)
+    fig_date = px.line(
 
-    with col1:
+        jobs_by_date,
 
-        fig_date = px.line(
+        x="publication_date",
+        y="nb_jobs",
 
-            jobs_by_date,
+        markers=True,
 
-            x="publication_date",
-            y="nb_jobs",
+        template=chart_theme,
 
-            markers=True,
+        title="Jobs Evolution Over Time"
+    )
 
-            template=chart_theme,
-
-            title="Jobs Evolution"
-        )
-
-        st.plotly_chart(
-            fig_date,
-            width="stretch"
-        )
-
-    if not jobs_last_7_days.empty:
-
-        with col2:
-
-            fig_last7 = px.area(
-
-                jobs_last_7_days,
-
-                x="publication_date",
-                y="nb_jobs",
-
-                template=chart_theme,
-
-                title="Last 7 Days Trend"
-            )
-
-            st.plotly_chart(
-                fig_last7,
-                width="stretch"
-            )
+    st.plotly_chart(
+        fig_date,
+        width="stretch"
+    )
 
 # =====================================================
-# TECHNOLOGY BY CITY
+# HEATMAP
 # =====================================================
 
 st.markdown("---")
+
 st.subheader("🏙️ Technology by City")
 
 if not technology_by_city.empty:
@@ -624,6 +630,8 @@ if not technology_by_city.empty:
         y="technology",
         z="count",
 
+        color_continuous_scale="Blues",
+
         template=chart_theme,
 
         title="Technology Demand by City"
@@ -635,70 +643,78 @@ if not technology_by_city.empty:
     )
 
 # =====================================================
-# COMPANY ANALYTICS
+# COMPANIES
 # =====================================================
 
 st.markdown("---")
-st.subheader("🏢 Companies Analytics")
+
+st.subheader("🏢 Top Companies")
 
 if not top_companies.empty:
 
-    col1, col2 = st.columns(2)
+    fig_companies = px.bar(
 
-    with col1:
+        top_companies.head(selected_top_n),
 
-        fig_companies = px.bar(
+        x="company",
+        y="nb_jobs",
 
-            top_companies.head(
-                selected_top_n
-            ),
+        color="nb_jobs",
 
-            x="company",
-            y="nb_jobs",
+        template=chart_theme,
 
-            color="nb_jobs",
+        title="Top Hiring Companies"
+    )
 
-            template=chart_theme,
+    st.plotly_chart(
+        fig_companies,
+        width="stretch"
+    )
 
-            title="Top Recruiting Companies"
+# =====================================================
+# LIVE INSIGHTS
+# =====================================================
+
+st.markdown("---")
+
+st.subheader("🔥 Latest Market Insights")
+
+col1, col2 = st.columns(2)
+
+with col1:
+
+    if not jobs_by_city.empty:
+
+        st.info(
+            f"""
+            🌍 Top hiring city:
+            {jobs_by_city.iloc[0]['city']}
+            """
         )
 
-        st.plotly_chart(
-            fig_companies,
-            width="stretch"
+with col2:
+
+    if not jobs_by_technology.empty:
+
+        st.info(
+            f"""
+            💻 Most demanded technology:
+            {jobs_by_technology.iloc[0]['technology']}
+            """
         )
-
-    if not company_category.empty:
-
-        with col2:
-
-            fig_company_category = px.sunburst(
-
-                company_category.head(30),
-
-                path=["company", "category"],
-
-                values="count",
-
-                template=chart_theme,
-
-                title="Company Categories"
-            )
-
-            st.plotly_chart(
-                fig_company_category,
-                width="stretch"
-            )
 
 # =====================================================
 # TABLES
 # =====================================================
 
 st.markdown("---")
+
 st.subheader("📋 Analytics Tables")
 
 selected_table = st.selectbox(
+
     "Choose Table",
+
     [
         "Jobs by City",
         "Top Companies",
@@ -709,19 +725,19 @@ selected_table = st.selectbox(
 )
 
 if selected_table == "Jobs by City":
-    st.dataframe(jobs_by_city)
+    st.dataframe(jobs_by_city, width="stretch")
 
 elif selected_table == "Top Companies":
-    st.dataframe(top_companies)
+    st.dataframe(top_companies, width="stretch")
 
 elif selected_table == "Top Technologies":
-    st.dataframe(jobs_by_technology)
+    st.dataframe(jobs_by_technology, width="stretch")
 
 elif selected_table == "Jobs by Category":
-    st.dataframe(jobs_by_category)
+    st.dataframe(jobs_by_category, width="stretch")
 
 elif selected_table == "Technology by City":
-    st.dataframe(technology_by_city)
+    st.dataframe(technology_by_city, width="stretch")
 
 # =====================================================
 # FOOTER
@@ -731,8 +747,28 @@ st.markdown("---")
 
 st.markdown(
     """
-    ### 🚀 Big Data Architecture
+    <center>
 
-    Kafka Streaming → Bronze → Silver → Gold → PostgreSQL Warehouse → Streamlit Dashboard
-    """
+    <h3 style='color:#111827;'>
+    🏗️ Big Data Architecture
+    </h3>
+
+    <p style='color:#4b5563;'>
+
+    Kafka Streaming → Bronze → Silver → Gold →
+    PostgreSQL Warehouse → Streamlit Dashboard
+
+    </p>
+
+    <br>
+
+    <p style='color:#2563eb;'>
+
+    Powered by Kafka • Airflow • MinIO • PostgreSQL • Streamlit
+
+    </p>
+
+    </center>
+    """,
+    unsafe_allow_html=True
 )

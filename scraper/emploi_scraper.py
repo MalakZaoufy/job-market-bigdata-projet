@@ -13,7 +13,7 @@ import unicodedata
 base_url = "https://www.emploi.ma/recherche-jobs-maroc?page={}"
 headers = {"User-Agent": "Mozilla/5.0"}
 
-pages_to_scrape = 30
+pages_to_scrape = 100
 
 it_keywords = [
     "informatique",

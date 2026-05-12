@@ -13,15 +13,23 @@ import glob
 # - Local Windows
 
 if os.path.exists("/opt/airflow"):
-    ENDPOINT_URL = "http://minio:9000"
-    FILE_PATH = "/opt/airflow/scraper/jobs_data_*.json"
+    BASE_DIR           = "/opt/airflow/scraper"
+    EMPLOIMA_PATTERN   = f"{BASE_DIR}/jobs_data_*.json"
+    REKRUTE_PATTERN    = f"{BASE_DIR}/data/raw/rekrute/rekrute_jobs*.json"
 else:
-    ENDPOINT_URL = "http://localhost:9000"
-    FILE_PATH = "jobs_data_*.json"
+    BASE_DIR           = "."
+    EMPLOIMA_PATTERN   = "jobs_data_*.json"
+    REKRUTE_PATTERN    = "data/raw/rekrute/rekrute_jobs*.json"
 
-ACCESS_KEY = "admin"
-SECRET_KEY = "admin123"
+ACCESS_KEY  = "admin"
+SECRET_KEY  = "admin123"
 BUCKET_NAME = "job-data-lake"
+
+ENDPOINT_URL = (
+    "http://minio:9000"
+    if os.path.exists("/opt/airflow")
+    else "http://localhost:9000"
+)
 
 print("Connexion vers :", ENDPOINT_URL)
 
@@ -48,67 +56,95 @@ print("Connexion MinIO OK")
 # =========================================
 
 try:
-
-    buckets = s3_client.list_buckets()
-
-    bucket_names = [
-        bucket["Name"]
-        for bucket in buckets["Buckets"]
-    ]
+    buckets      = s3_client.list_buckets()
+    bucket_names = [b["Name"] for b in buckets["Buckets"]]
 
     if BUCKET_NAME not in bucket_names:
-
         s3_client.create_bucket(Bucket=BUCKET_NAME)
-
         print("Bucket créé :", BUCKET_NAME)
 
 except Exception as e:
-
     print("Erreur connexion MinIO :", e)
     exit()
 
 # =========================================
-# RÉCUPÉRATION DERNIER JSON
+# RÉSOLUTION DES FICHIERS À UPLOADER
 # =========================================
-
-files = glob.glob(FILE_PATH)
-
-if not files:
-
-    raise Exception(
-        f"Aucun fichier trouvé avec : {FILE_PATH}"
-    )
-
-# dernier fichier créé
-latest_file = max(files, key=os.path.getctime)
-
-LOCAL_FILE = latest_file
-
-print("Fichier utilisé pour upload :", LOCAL_FILE)
-
-# =========================================
-# NOM FICHIER BRONZE
+# Structure :
+#   {
+#     "source_label": "chemin/local/fichier.json"
+#   }
 # =========================================
 
 now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-OBJECT_NAME = f"bronze/jobs_{now}.json"
+files_to_upload = {}
+
+# --- Emploi.ma : dernier fichier créé matching le pattern ---
+emploima_files = glob.glob(EMPLOIMA_PATTERN)
+if emploima_files:
+    latest_emploima = max(emploima_files, key=os.path.getctime)
+    files_to_upload["emploima"] = {
+        "local_path":   latest_emploima,
+        "object_name":  f"bronze/batch/emploima/jobs_{now}.json",
+    }
+    print(f"[emploi.ma]  Fichier trouvé : {latest_emploima}")
+else:
+    print(f"[emploi.ma]  Aucun fichier trouvé ({EMPLOIMA_PATTERN}) — ignoré")
+
+# --- Rekrute : dernier fichier créé matching le pattern ---
+rekrute_files = glob.glob(REKRUTE_PATTERN)
+if rekrute_files:
+    latest_rekrute = max(rekrute_files, key=os.path.getctime)
+    files_to_upload["rekrute"] = {
+        "local_path":  latest_rekrute,
+        "object_name": f"bronze/batch/rekrute/rekrute_jobs_{now}.json",
+    }
+    print(f"[rekrute]    Fichier trouvé : {latest_rekrute}")
+else:
+    print(f"[rekrute]    Aucun fichier trouvé ({REKRUTE_PATTERN}) — ignoré")
 
 # =========================================
-# UPLOAD
+# VÉRIFICATION : au moins 1 fichier
 # =========================================
 
-try:
-
-    s3_client.upload_file(
-        LOCAL_FILE,
-        BUCKET_NAME,
-        OBJECT_NAME
+if not files_to_upload:
+    raise Exception(
+        "Aucun fichier JSON trouvé (ni emploi.ma ni rekrute). "
+        "Lancez les scrapers avant l'upload."
     )
 
-    print("Upload réussi ✅")
-    print("Chemin :", OBJECT_NAME)
+# =========================================
+# UPLOAD DE CHAQUE FICHIER
+# =========================================
 
-except Exception as e:
+success_count = 0
+error_count   = 0
 
-    print("Erreur upload :", e)
+for source, info in files_to_upload.items():
+
+    local_path  = info["local_path"]
+    object_name = info["object_name"]
+
+    print(f"\n--- Upload [{source}] ---")
+    print(f"  Local  : {local_path}")
+    print(f"  MinIO  : {object_name}")
+
+    try:
+        s3_client.upload_file(local_path, BUCKET_NAME, object_name)
+        print(f"  ✅ Upload réussi")
+        success_count += 1
+
+    except Exception as e:
+        print(f"  ❌ Erreur upload : {e}")
+        error_count += 1
+
+# =========================================
+# RÉSUMÉ FINAL
+# =========================================
+
+print(f"\n{'=' * 40}")
+print(f"  Upload terminé")
+print(f"  ✅ Succès  : {success_count}")
+print(f"  ❌ Erreurs : {error_count}")
+print(f"{'=' * 40}")

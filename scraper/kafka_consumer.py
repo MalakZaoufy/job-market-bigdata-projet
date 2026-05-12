@@ -9,22 +9,12 @@ from datetime import datetime
 # =========================================
 
 consumer = KafkaConsumer(
-
     "jobs_topic",
-
     bootstrap_servers="localhost:9092",
-
-    # lire seulement nouveaux messages
     auto_offset_reset="latest",
-
     enable_auto_commit=True,
-
-    # garder toujours même group_id
     group_id="jobs-group",
-
-    value_deserializer=lambda x: json.loads(
-        x.decode("utf-8")
-    )
+    value_deserializer=lambda x: json.loads(x.decode("utf-8"))
 )
 
 print("Consumer Kafka démarré...\n")
@@ -34,38 +24,30 @@ print("Consumer Kafka démarré...\n")
 # =========================================
 
 MINIO_ENDPOINT = "http://localhost:9000"
-
-ACCESS_KEY = "admin"
-SECRET_KEY = "admin123"
-
-BUCKET_NAME = "job-data-lake"
+ACCESS_KEY     = "admin"
+SECRET_KEY     = "admin123"
+BUCKET_NAME    = "job-data-lake"
 
 # =========================================
 # CONNEXION MINIO
 # =========================================
 
 s3 = boto3.client(
-
     "s3",
-
     endpoint_url=MINIO_ENDPOINT,
-
     aws_access_key_id=ACCESS_KEY,
-
     aws_secret_access_key=SECRET_KEY,
-
     config=Config(
         signature_version="s3v4",
         s3={"addressing_style": "path"}
     ),
-
     region_name="us-east-1"
 )
 
 print("Connexion MinIO OK")
 
 # =========================================
-# CHARGER ANCIENS LINKS BRONZE
+# CHARGEMENT HISTORIQUE BRONZE
 # =========================================
 
 existing_links = set()
@@ -73,7 +55,6 @@ existing_links = set()
 print("\nChargement historique Bronze Kafka...\n")
 
 try:
-
     objects = s3.list_objects_v2(
         Bucket=BUCKET_NAME,
         Prefix="bronze/kafka/"
@@ -85,186 +66,119 @@ try:
         if obj["Key"].endswith(".json")
     ]
 
-    print(f"Fichiers Bronze Kafka trouvés : {len(files)}")
+    print(f"Fichiers trouvés : {len(files)}")
 
     for file_key in files:
-
         try:
-
-            obj = s3.get_object(
-                Bucket=BUCKET_NAME,
-                Key=file_key
-            )
-
-            data = json.loads(
-                obj["Body"].read()
-            )
+            obj  = s3.get_object(Bucket=BUCKET_NAME, Key=file_key)
+            data = json.loads(obj["Body"].read())
 
             if isinstance(data, list):
-
                 for job in data:
-
-                    # priorité id
-                    if "id" in job:
-                        existing_links.add(
-                            job["id"]
-                        )
-
-                    elif "link" in job:
-                        existing_links.add(
-                            job["link"]
-                        )
+                    link = job.get("id") or job.get("link")
+                    if link:
+                        existing_links.add(link)
 
         except Exception as e:
-
-            print(
-                f"Erreur lecture {file_key} : {e}"
-            )
+            print(f"Erreur lecture {file_key} : {e}")
 
 except Exception as e:
+    print("Erreur chargement historique :", e)
 
-    print(
-        "Erreur chargement historique :",
-        e
+print(f"Offres déjà connues : {len(existing_links)}\n")
+
+# =========================================
+# AFFICHAGE TERMINAL
+# =========================================
+
+def print_job(job):
+    sep = "─" * 55
+    print(sep)
+    print(f"  title            : {job.get('title', '')}")
+    print(f"  company          : {job.get('company', '')}")
+    print(f"  city             : {job.get('city', '')}")
+    print(f"  publication_date : {job.get('publication_date', '')}")
+    print(f"  link             : {job.get('link', '')}")
+    print(f"  source           : {job.get('source', '')}")
+    print(f"  scraping_time    : {job.get('scraping_time', '')}")
+
+# =========================================
+# UPLOAD MINIO
+# =========================================
+
+def upload_to_minio(buffer):
+    """
+    Envoie le buffer (liste de jobs mixtes rekrute + emploi.ma)
+    dans un seul fichier JSON sous bronze/kafka/.
+    """
+    now         = datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f")
+    object_name = f"bronze/kafka/kafka_jobs_{now}.json"
+
+    body = json.dumps(buffer, ensure_ascii=False, indent=4).encode("utf-8")
+
+    s3.put_object(
+        Bucket=BUCKET_NAME,
+        Key=object_name,
+        Body=body,
+        ContentType="application/json"
     )
 
-print(
-    f"Offres déjà connues : {len(existing_links)}"
-)
+    print(f"\n{'=' * 55}")
+    print(f"  ✅ Fichier Bronze envoyé vers MinIO")
+    print(f"  Chemin  : {object_name}")
+    print(f"  Offres  : {len(buffer)}")
+    print(f"{'=' * 55}\n")
 
 # =========================================
 # BUFFER MICRO-BATCH
 # =========================================
 
 jobs_buffer = []
-
-BUFFER_SIZE = 5
+BUFFER_SIZE  = 5
 
 # =========================================
-# LECTURE TEMPS RÉEL
+# LECTURE STREAMING
 # =========================================
+
+print("En attente de messages...\n")
 
 for message in consumer:
 
     try:
-
         job = message.value
 
-        # =====================================
-        # IDENTIFIANT UNIQUE
-        # =====================================
+        # ---------------------------------
+        # ID UNIQUE
+        # ---------------------------------
+        job_id = job.get("id") or job.get("link")
 
-        job_id = job.get(
-            "id",
-            job.get("link")
-        )
-
-        # =====================================
-        # IGNORER DOUBLONS HISTORIQUES
-        # =====================================
-
+        # ---------------------------------
+        # IGNORER DOUBLONS
+        # ---------------------------------
         if job_id in existing_links:
-
-            print(
-                "Offre déjà présente ignorée ⏭️"
-            )
-
-            print(job.get("title"))
-
-            print("-" * 60)
-
+            print(f"  ⏭️  Doublon ignoré : {job.get('title', job_id)}")
             continue
-
-        # =====================================
-        # AJOUT MÉMOIRE
-        # =====================================
 
         existing_links.add(job_id)
 
-        # =====================================
-        # NOUVELLE OFFRE
-        # =====================================
+        # ---------------------------------
+        # AFFICHAGE
+        # ---------------------------------
+        print_job(job)
 
-        print("Nouvelle offre reçue ✅")
-
-        print(
-            json.dumps(
-                job,
-                indent=4,
-                ensure_ascii=False
-            )
-        )
-
-        print("-" * 60)
-
-        # =====================================
-        # BUFFER
-        # =====================================
-
+        # ---------------------------------
+        # AJOUT AU BUFFER
+        # ---------------------------------
         jobs_buffer.append(job)
 
-        print(
-            f"Taille buffer : "
-            f"{len(jobs_buffer)} / {BUFFER_SIZE}"
-        )
+        print(f"  Buffer : {len(jobs_buffer)} / {BUFFER_SIZE}")
 
-        # =====================================
-        # MICRO-BATCH BRONZE
-        # =====================================
-
+        # ---------------------------------
+        # MICRO-BATCH → MINIO
+        # ---------------------------------
         if len(jobs_buffer) >= BUFFER_SIZE:
-
-            now = datetime.now().strftime(
-                "%Y-%m-%d_%H-%M-%S-%f"
-            )
-
-            object_name = (
-                f"bronze/kafka/"
-                f"kafka_jobs_{now}.json"
-            )
-
-            # =================================
-            # UPLOAD MINIO
-            # =================================
-
-            s3.put_object(
-
-                Bucket=BUCKET_NAME,
-
-                Key=object_name,
-
-                Body=json.dumps(
-                    jobs_buffer,
-                    ensure_ascii=False,
-                    indent=4
-                )
-            )
-
-            print(
-                "\nFichier Bronze Kafka créé ✅"
-            )
-
-            print(
-                "Chemin :",
-                object_name
-            )
-
-            print(
-                f"Nombre offres sauvegardées : "
-                f"{len(jobs_buffer)}"
-            )
-
-            print("-" * 60)
-
-            # =================================
-            # RESET BUFFER
-            # =================================
-
-            jobs_buffer = []
+            upload_to_minio(jobs_buffer)
+            jobs_buffer = []           # reset immédiat après upload
 
     except Exception as e:
-
-        print(
-            "Erreur Consumer :",
-            e
-        )
+        print(f"Erreur Consumer : {e}")
